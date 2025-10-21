@@ -18,6 +18,7 @@ ENV PIP_PREFER_BINARY=1
 ENV PYTHONUNBUFFERED=1
 # Speed up some cmake builds
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
+ENV RUNPOD_HANDLER=handler.handler
 
 # Install Python, git and other necessary tools
 RUN apt-get update && apt-get install -y \
@@ -138,3 +139,15 @@ FROM base AS final
 
 # Copy models from stage 2 to the final image
 COPY --from=downloader /comfyui/models /comfyui/models
+
+# Install AWS CLI for s3 syncs
+RUN apt-get update && apt-get install -y --no-install-recommends awscli && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY sync_from_s3.py /app/sync_from_s3.py
+COPY entrypoint.sh   /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Start: sync from S3 → launch ComfyUI → start RunPod
+CMD ["/app/entrypoint.sh"]
