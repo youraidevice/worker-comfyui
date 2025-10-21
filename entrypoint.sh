@@ -16,10 +16,12 @@ mkdir -p "$COMFY_ROOT/models" "$COMFY_ROOT/custom_nodes" /app/workflows
 [[ "${S3_FORCE_PATH_STYLE:-false}" == "true" ]] && export AWS_S3_FORCE_PATH_STYLE=true
 
 if [[ "$MODE" == "serverless" ]]; then
-  echo "[entrypoint] launching ComfyUI (bg) + RunPod serverless loop…"
+  echo "[entrypoint] launching ComfyUI (bg) + runpod worker"
   /opt/venv/bin/python /comfyui/main.py --listen 0.0.0.0 --port 8188 --enable-cors-header "*" &
-  exec /opt/venv/bin/python -m runpod
+  # run handler.py directly (it calls runpod.serverless.start)
+  exec /opt/venv/bin/python /app/handler.py
 else
-  echo "[entrypoint] launching ComfyUI (pod/interactive)…"
+  echo "[entrypoint] launching ComfyUI (pod/interactive)"
   exec /opt/venv/bin/python /comfyui/main.py --listen 0.0.0.0 --port 8188 --enable-cors-header "*"
 fi
+
