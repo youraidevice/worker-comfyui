@@ -86,7 +86,8 @@ FROM base AS final
 COPY --from=downloader /comfyui/models /comfyui/models
 
 # AWS CLI for s3 sync
-RUN apt-get update && apt-get install -y --no-install-recommends awscli && rm -rf /var/lib/apt/lists/*
+# Install AWS CLI (v1) into the existing uv/venv
+RUN uv pip install awscli
 
 # RunPod handler entry
 ENV RUNPOD_HANDLER=handler.handler
