@@ -14,11 +14,21 @@ ENV PIP_PREFER_BINARY=1
 ENV PYTHONUNBUFFERED=1
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
-RUN apt-get update && apt-get install -y \
-    python3.12 python3.12-venv git wget libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3-pip \
+    git \
+    wget \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    ffmpeg \
  && ln -sf /usr/bin/python3.12 /usr/bin/python \
  && ln -sf /usr/bin/pip3 /usr/bin/pip \
- && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+ && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
 # uv + venv
 RUN wget -qO- https://astral.sh/uv/install.sh | sh \
@@ -26,6 +36,9 @@ RUN wget -qO- https://astral.sh/uv/install.sh | sh \
  && ln -s /root/.local/bin/uvx /usr/local/bin/uvx \
  && uv venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
+
+# In the final stage (or anywhere after `uv venv /opt/venv`)
+RUN uv pip install --no-cache-dir awscli
 
 # comfy-cli + ComfyUI
 RUN uv pip install comfy-cli pip setuptools wheel
