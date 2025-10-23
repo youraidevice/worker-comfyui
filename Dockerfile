@@ -1,7 +1,5 @@
-# Build argument for base image selection.
-ARG BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
-
 # ---------- Stage 1: Base ----------
+ARG BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 ARG COMFYUI_VERSION=latest
@@ -37,10 +35,10 @@ RUN wget -qO- https://astral.sh/uv/install.sh | sh \
  && uv venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# In the final stage (or anywhere after `uv venv /opt/venv`)
+# awscli for runtime S3 syncs
 RUN uv pip install --no-cache-dir awscli
 
-# comfy-cli + ComfyUI
+# comfy-cli + ComfyUI (installs into /comfyui/ComfyUI)
 RUN uv pip install comfy-cli pip setuptools wheel
 RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
       /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --cuda-version "${CUDA_VERSION_FOR_COMFY}" --nvidia; \
@@ -48,68 +46,25 @@ RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
       /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia; \
     fi
 
-# Optional PyTorch upgrade
+# Optional: PyTorch upgrade (usually unnecessary)
 RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
       uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
     fi
 
-# Python deps for handler
+# Handler deps
 RUN uv pip install runpod requests websocket-client
 
-# ---------- Stage 2: (optional) model downloader ----------
-FROM base AS downloader
-ARG HUGGINGFACE_ACCESS_TOKEN
-ARG MODEL_TYPE=flux1-dev-fp8
-
-WORKDIR /comfyui
-RUN mkdir -p models/checkpoints models/vae models/unet models/clip
-
-RUN if [ "$MODEL_TYPE" = "sdxl" ]; then \
-      wget -q -O models/checkpoints/sd_xl_base_1.0.safetensors https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors && \
-      wget -q -O models/vae/sdxl_vae.safetensors https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors && \
-      wget -q -O models/vae/sdxl-vae-fp16-fix.safetensors https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/main/sdxl_vae.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "sd3" ]; then \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/checkpoints/sd3_medium_incl_clips_t5xxlfp8.safetensors https://huggingface.co/stabilityai/stable-diffusion-3-medium/resolve/main/sd3_medium_incl_clips_t5xxlfp8.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "flux1-schnell" ]; then \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/unet/flux1-schnell.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors && \
-      wget -q -O models/clip/clip_l.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors && \
-      wget -q -O models/clip/t5xxl_fp8_e4m3fn.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors && \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "flux1-dev" ]; then \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/unet/flux1-dev.safetensors https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors && \
-      wget -q -O models/clip/clip_l.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors && \
-      wget -q -O models/clip/t5xxl_fp8_e4m3fn.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors && \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "flux1-dev-fp8" ]; then \
-      wget -q -O models/checkpoints/flux1-dev-fp8.safetensors https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors; \
-    fi
-
-# ---------- Stage 3: Final ----------
+# ---------- Stage 2: Final (no model downloads) ----------
 FROM base AS final
 
-# bring models from downloader stage
-COPY --from=downloader /comfyui/models /comfyui/models
+# (No COPY from downloader; models will be mounted or S3-synced at runtime)
 
-# AWS CLI for s3 sync
-# Install AWS CLI (v1) into the existing uv/venv
-RUN uv pip install awscli
-
-# RunPod handler entry
-ENV RUNPOD_HANDLER=handler.handler
-
-# app files expected in repo root
 WORKDIR /app
-COPY handler.py test_input.json /app/
+# If you don't have test_input.json, remove it from this COPY line.
+COPY handler.py /app/
 COPY sync_from_s3.py /app/sync_from_s3.py
 COPY entrypoint.sh   /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Start: sync from S3 (optional) → launch ComfyUI → run serverless handler
 CMD ["/app/entrypoint.sh"]
